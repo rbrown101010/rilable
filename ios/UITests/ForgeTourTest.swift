@@ -1,6 +1,6 @@
 import XCTest
 
-/// Tours the Rilable UI: home -> left drawer -> newest project chat ->
+/// Tours the Forge UI: home -> left drawer -> newest project chat ->
 /// (preview if live) -> home button back. Attaches screenshots throughout.
 final class ForgeTourTest: XCTestCase {
     private func snap(_ app: XCUIApplication, _ name: String) {

@@ -1,6 +1,6 @@
-# Rilable — agent setup guide
+# Forge — agent setup guide
 
-Rilable is an open-source iOS app that builds **live web apps and native iOS apps from a
+Forge is an open-source iOS app that builds **live web apps and native iOS apps from a
 prompt** — a Lovable/Replit-mobile-style builder you run on your own accounts. SwiftUI front
 end, Convex backend, Claude for code generation, Daytona cloud sandboxes for web apps, Chorus
 cloud Xcode builds for iOS apps.
@@ -54,15 +54,19 @@ Ask the user for these one at a time, then set each with
 
 | Env var | Get it at | Powers | Needed for |
 |---|---|---|---|
+| `RILABLE_ACCESS_TOKEN` | generate a long random string locally | single-user gate for app/backend calls | **Recommended before real keys** |
 | `ANTHROPIC_API_KEY` | console.anthropic.com → Settings → API Keys | Claude writes the apps | **Required** |
 | `DAYTONA_API_KEY` | app.daytona.io → Settings → API Keys | web-app sandboxes | Web builds |
 | `CHORUS_API_KEY` | ios.chorus.com (Vibecode's iOS build service — install its CLI with `curl -fsSL https://ios.chorus.com/install.sh \| bash`, then `./build-ios-apps/ios-cli login`; the key starts with `chorus_`) | cloud Xcode builds + signing | Mobile builds |
 | `CHORUS_USER_ID` | printed by the Chorus CLI after login (also in `~/.vibecode/ios/config.json` as `userId`) | device-install signing | Mobile installs |
 | `OPENAI_API_KEY` | platform.openai.com → API keys | Whisper voice input | Optional |
 | `VERCEL_AI_GATEWAY_KEY` | vercel.com dashboard → AI Gateway → API keys (starts `vck_`) | AI features inside generated apps | Optional |
+| `FORGE_ANDROID_APK_BUILDER_URL` | your APK builder service `/build` URL | Android APK export for web projects | Optional |
+| `FORGE_ANDROID_APK_BUILDER_TOKEN` | generate a long random string locally | protects APK builder calls | Recommended if APK builder is network-exposed |
 
-Minimum viable setup: `ANTHROPIC_API_KEY` + `DAYTONA_API_KEY` (web builds only). Skip any
-optional key the user doesn't want — the related feature degrades gracefully.
+Minimum viable setup: `RILABLE_ACCESS_TOKEN` + `ANTHROPIC_API_KEY` + `DAYTONA_API_KEY` (web builds only). Skip any
+optional key the user doesn't want — the related feature degrades gracefully. Keep
+`RILABLE_ALLOW_PUBLIC_AI_PROXY` unset unless the user explicitly accepts a public disposable demo proxy.
 
 ## Step 3 — iOS app
 
@@ -70,6 +74,7 @@ optional key the user doesn't want — the related feature degrades gracefully.
 cp ios/AppConfig.example.swift ios/Sources/AppConfig.swift
 # edit ios/Sources/AppConfig.swift:
 #   convexDeploymentURL = the CONVEX_URL from backend/.env.local
+#   accessToken         = the RILABLE_ACCESS_TOKEN you set on Convex
 #   userName            = the user's first name (home-screen greeting)
 ```
 
@@ -119,9 +124,9 @@ device install will walk the user through Apple sign-in via a login link in the 
   the errors and rebuilds, up to 2 rounds) before a failure is shown.
 - Device installs: if signing fails, the agent in the app posts an Apple login link or a
   device-registration link in the chat — that's the designed flow, not a bug.
-- The AI proxy (`/ai/*` on your `.convex.site` domain) is intentionally unauthenticated so
-  generated apps can call it — anyone with the URL can spend your gateway credits. Rotate the
-  `vck_` key if that's a concern.
+- The AI proxy (`/ai/*` on your `.convex.site` domain) is disabled by default. Do not set
+  `RILABLE_ALLOW_PUBLIC_AI_PROXY=true` unless the user explicitly accepts the spend risk for a
+  disposable demo; otherwise use `RILABLE_ACCESS_TOKEN` and server-side calls only.
 
 ## Repo map
 

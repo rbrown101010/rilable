@@ -10,4 +10,9 @@ enum AppConfig {
 
     /// Shown in the home-screen greeting: "Got an idea, <name>?"
     static let userName = "Builder"
+
+    /// Optional single-user access token. If you set RILABLE_ACCESS_TOKEN on
+    /// the Convex deployment, put the same value here before building the app.
+    /// Leave empty only for local experiments with no real API keys attached.
+    static let accessToken = ""
 }

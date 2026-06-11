@@ -19,7 +19,7 @@ struct WelcomeView: View {
                     .scaleEffect(appeared ? 1 : 0.6)
                     .opacity(appeared ? 1 : 0)
 
-                Text("Rilable")
+                Text("Forge")
                     .font(.system(size: 46, weight: .bold, design: .serif))
                     .foregroundStyle(.white)
                     .padding(.top, 22)

@@ -72,7 +72,7 @@ final class VoiceRecorder: ObservableObject {
                 guard data.count > 2_000 else { return } // too short to bother
                 let result: TranscriptionResult = try await ConvexService.shared.client.action(
                     "voice:transcribe",
-                    with: ["audioBase64": data.base64EncodedString()]
+                    with: ConvexService.authArgs(["audioBase64": data.base64EncodedString()])
                 )
                 let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !text.isEmpty {

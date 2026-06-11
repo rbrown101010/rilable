@@ -7,6 +7,8 @@ import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import JSZip from "jszip";
 import { resolveModel } from "./models";
+import { isPublicAiProxyAllowed } from "./auth";
+import { androidApkBuildSpec } from "./android";
 import {
   renderPbxproj,
   XCSCHEME,
@@ -274,7 +276,7 @@ async function chorusJson<T>(
 function bundleIdFor(name: string, projectId: string): string {
   const slug =
     name.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 20) || "app";
-  return `com.rilable.app.${slug}${projectId.slice(-6).toLowerCase()}`;
+  return `com.forge.app.${slug}${projectId.slice(-6).toLowerCase()}`;
 }
 
 async function zipMobileProject(
@@ -434,13 +436,13 @@ const DESIGN_RULES = `RULES:
 - Everything must WORK. Every button does something real. No placeholders, no dead links, no TODOs, no console errors.
 - Keep the whole app under ~700 lines total.`;
 
-const GENERATE_SYSTEM = `You are Rilable, an elite web-app builder. You produce complete, beautiful, fully-working single-page web apps from a short request.
+const GENERATE_SYSTEM = `You are Forge, an elite web-app builder. You produce complete, beautiful, fully-working single-page web apps from a short request.
 
 ${OUTPUT_FORMAT}
 
 ${DESIGN_RULES}`;
 
-const EDIT_SYSTEM = `You are Rilable, an elite web-app builder. You are updating an existing app. You receive the app's current files, recent conversation, and a change request. Re-output the ENTIRE app — every file in full, including unchanged files. Files you omit will be DELETED. Keep the existing APP_NAME and APP_EMOJI unless the user asks to change them; SUMMARY should describe what you changed.
+const EDIT_SYSTEM = `You are Forge, an elite web-app builder. You are updating an existing app. You receive the app's current files, recent conversation, and a change request. Re-output the ENTIRE app — every file in full, including unchanged files. Files you omit will be DELETED. Keep the existing APP_NAME and APP_EMOJI unless the user asks to change them; SUMMARY should describe what you changed.
 
 ${OUTPUT_FORMAT}
 
@@ -470,19 +472,19 @@ const MOBILE_RULES = `RULES:
 - Everything must WORK. Every button does something real. No placeholders, no TODOs.
 - Keep the whole app under ~600 lines total.`;
 
-const MOBILE_GENERATE_SYSTEM = `You are Rilable, an elite iOS engineer. You produce complete, beautiful, fully-working SwiftUI apps from a short request.
+const MOBILE_GENERATE_SYSTEM = `You are Forge, an elite iOS engineer. You produce complete, beautiful, fully-working SwiftUI apps from a short request.
 
 ${MOBILE_OUTPUT_FORMAT}
 
 ${MOBILE_RULES}`;
 
-const MOBILE_EDIT_SYSTEM = `You are Rilable, an elite iOS engineer. You are updating an existing SwiftUI app. You receive the app's current files, recent conversation, and a change request. Re-output the ENTIRE app — every file in full, including unchanged files. Files you omit will be DELETED. Keep the existing APP_NAME and APP_EMOJI unless the user asks to change them; SUMMARY should describe what you changed.
+const MOBILE_EDIT_SYSTEM = `You are Forge, an elite iOS engineer. You are updating an existing SwiftUI app. You receive the app's current files, recent conversation, and a change request. Re-output the ENTIRE app — every file in full, including unchanged files. Files you omit will be DELETED. Keep the existing APP_NAME and APP_EMOJI unless the user asks to change them; SUMMARY should describe what you changed.
 
 ${MOBILE_OUTPUT_FORMAT}
 
 ${MOBILE_RULES}`;
 
-const MOBILE_FIX_SYSTEM = `You are Rilable, an elite iOS engineer. The SwiftUI app below FAILED to compile. Fix every compiler error and re-output the ENTIRE app — every file in full, including unchanged files. Do not change the app's design or features beyond what the fixes require. Keep the existing APP_NAME and APP_EMOJI; SUMMARY should stay a description of the app (not the fix).
+const MOBILE_FIX_SYSTEM = `You are Forge, an elite iOS engineer. The SwiftUI app below FAILED to compile. Fix every compiler error and re-output the ENTIRE app — every file in full, including unchanged files. Do not change the app's design or features beyond what the fixes require. Keep the existing APP_NAME and APP_EMOJI; SUMMARY should stay a description of the app (not the fix).
 
 ${MOBILE_OUTPUT_FORMAT}
 
@@ -502,7 +504,7 @@ function fixUserPrompt(
 /// (Vercel AI Gateway, key injected server-side by convex/http.ts).
 function aiSkill(platform: "web" | "mobile"): string {
   const site = process.env.CONVEX_SITE_URL;
-  if (!site) return "";
+  if (!site || !isPublicAiProxyAllowed()) return "";
   const endpoint = `${site}/ai/chat/completions`;
   if (platform === "web") {
     return `
@@ -522,7 +524,291 @@ AI SKILL — every app you build has FREE access to a built-in AI endpoint (auth
 - Calls to THIS endpoint are allowed and encouraged (the avoid-network-calls rule does not apply to it). Show a loading state while waiting; handle failures with a friendly message.`;
 }
 
+export const BUILDER_PROVIDER_ENV = "RILABLE_BUILDER_PROVIDER";
+
+function builderProvider(): "anthropic" | "poc-template" {
+  const value = (process.env[BUILDER_PROVIDER_ENV] ?? "anthropic").toLowerCase().trim();
+  if (["poc-template", "template", "zero-cost"].includes(value)) return "poc-template";
+  return "anthropic";
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function titleFromPrompt(prompt: string): string {
+  const words = prompt
+    .replace(/[^a-z0-9\s-]/gi, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 3);
+  if (words.length === 0) return "POC App";
+  return words.map((w) => w[0]?.toUpperCase() + w.slice(1).toLowerCase()).join(" ").slice(0, 18);
+}
+
+function isProjectOpsPrompt(prompt: string): boolean {
+  const t = prompt.toLowerCase();
+  return /\b(project|projects|projectops|dashboard|software|dev|delivery|agile|kanban|backlog|sprint|roadmap)\b/.test(t) &&
+    /\b(agile|kanban|backlog|sprint|blocked|blockers|risks|dependencies|owners?|next actions?|recommendations?|software)\b/.test(t);
+}
+
+function renderProjectOpsTemplate(): string {
+  return [
+    "APP_NAME: ProjectOps",
+    "APP_EMOJI: 📊",
+    "SUMMARY: Agile software delivery board with backlog, Kanban, sprint focus, lightweight dependencies, risks, blocked flag, and AI project manager recommendations.",
+    "===FILE: index.html===",
+    "<!doctype html>",
+    "<html lang=\"en\">",
+    "<head>",
+    "  <meta charset=\"utf-8\" />",
+    "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\" />",
+    "  <title>ProjectOps</title>",
+    "  <link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">",
+    "  <link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>",
+    "  <link href=\"https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap\" rel=\"stylesheet\">",
+    "  <link rel=\"stylesheet\" href=\"style.css\" />",
+    "</head>",
+    "<body>",
+    "  <main class=\"shell\">",
+    "    <header class=\"hero\">",
+    "      <p class=\"eyebrow\">Virgil software command surface</p>",
+    "      <h1>ProjectOps</h1>",
+    "      <p>Agile software delivery for Forge-style work: backlog, Kanban, sprint focus, blockers, risks, dependencies, and one AI project manager recommendation.</p>",
+    "      <div class=\"metrics\" id=\"metrics\"></div>",
+    "    </header>",
+    "    <nav class=\"tabs\" aria-label=\"ProjectOps views\">",
+    "      <button class=\"tab active\" data-view=\"board\">Kanban board</button>",
+    "      <button class=\"tab\" data-view=\"backlog\">Backlog</button>",
+    "      <button class=\"tab\" data-view=\"sprint\">Sprint focus</button>",
+    "      <button class=\"tab\" data-view=\"risks\">Risks & blockers</button>",
+    "      <button class=\"tab\" data-view=\"pm\">AI project manager</button>",
+    "    </nav>",
+    "    <section class=\"workspace\">",
+    "      <form id=\"work-item-form\" class=\"card form-card\">",
+    "        <h2>Add / update work item</h2>",
+    "        <input name=\"id\" type=\"hidden\" />",
+    "        <input name=\"title\" placeholder=\"Feature, bug, chore, or decision\" required />",
+    "        <input name=\"owner\" placeholder=\"Owner\" required />",
+    "        <select name=\"type\"><option>Feature</option><option>Bug</option><option>Chore</option><option>Decision</option><option>Side quest</option></select>",
+    "        <select name=\"status\"><option>Backlog</option><option>Ready</option><option>Doing</option><option>Review</option><option>Done</option></select>",
+    "        <select name=\"priority\"><option>High</option><option>Medium</option><option>Low</option><option>Parked</option></select>",
+    "        <select name=\"effort\"><option>Small</option><option>Medium</option><option>Large</option></select>",
+    "        <label class=\"check\"><input name=\"blocked\" type=\"checkbox\" /> blocked flag</label>",
+    "        <textarea name=\"nextAction\" placeholder=\"Next action\" required></textarea>",
+    "        <textarea name=\"dependency\" placeholder=\"Dependency or decision needed\"></textarea>",
+    "        <textarea name=\"risk\" placeholder=\"Risk / failure mode\"></textarea>",
+    "        <button type=\"submit\">Save item</button>",
+    "      </form>",
+    "      <section class=\"card view-card\"><div class=\"filters\"><label>Status filter <select id=\"status-filter\"><option value=\"all\">All live work</option><option>Backlog</option><option>Ready</option><option>Doing</option><option>Review</option><option>Done</option></select></label><button id=\"clear-done\" type=\"button\">Clear done</button></div><section id=\"view\"></section></section>",
+    "    </section>",
+    "  </main>",
+    "  <script src=\"app.js\"></script>",
+    "</body>",
+    "</html>",
+    "===END FILE===",
+    "===FILE: style.css===",
+    ":root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; --bg:#07111f; --card:#101c2dcc; --line:#ffffff18; --text:#f8fafc; --muted:#9fb0c7; --accent:#38bdf8; --hot:#fb7185; --ok:#34d399; --warn:#fbbf24; --purple:#a78bfa; }",
+    "* { box-sizing: border-box; }",
+    "body { margin: 0; min-height: 100vh; background: radial-gradient(circle at 20% 0%, #2563eb66, transparent 34rem), linear-gradient(135deg, #020617, var(--bg)); color: var(--text); }",
+    ".shell { width: min(1180px, 100%); margin: 0 auto; padding: max(1.25rem, env(safe-area-inset-top)) 1rem 2rem; }",
+    ".hero, .card, .tabs { border: 1px solid var(--line); background: var(--card); border-radius: 26px; box-shadow: 0 24px 90px #0008; backdrop-filter: blur(18px); }",
+    ".hero { padding: 1.25rem; }",
+    ".eyebrow { color: var(--accent); text-transform: uppercase; letter-spacing: .14em; font-size: .74rem; font-weight: 900; }",
+    "h1 { font-size: clamp(2.6rem, 12vw, 6rem); line-height: .86; margin: .2rem 0 .9rem; letter-spacing: -.08em; }",
+    "h2, h3 { margin: 0 0 .8rem; }",
+    "p { color: var(--muted); line-height: 1.5; }",
+    ".metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7rem; margin-top: 1rem; }",
+    ".metric { padding: .8rem; border-radius: 18px; background: #ffffff10; }",
+    ".metric strong { display: block; font-size: 1.35rem; }",
+    ".tabs { display: flex; gap: .5rem; padding: .45rem; margin: 1rem 0; overflow-x: auto; }",
+    "button, input, select, textarea { font: inherit; }",
+    "button { border: 0; border-radius: 999px; padding: .85rem 1rem; background: #ffffff14; color: var(--text); font-weight: 900; }",
+    "button.active, form button { background: linear-gradient(135deg, #2563eb, #38bdf8); box-shadow: 0 14px 34px #38bdf844; }",
+    ".workspace { display: grid; gap: 1rem; }",
+    ".card { padding: 1rem; }",
+    "form { display: grid; gap: .75rem; }",
+    "input, select, textarea { width: 100%; border: 1px solid var(--line); border-radius: 16px; background: #020617aa; color: var(--text); padding: .85rem; }",
+    "textarea { min-height: 84px; resize: vertical; }",
+    ".filters { display:flex; gap:.7rem; align-items:end; justify-content:space-between; flex-wrap:wrap; margin-bottom:1rem; } .filters label { color:var(--muted); font-weight:800; } .filters select { min-width:160px; margin-top:.3rem; }",
+    ".check { color: var(--muted); display:flex; gap:.55rem; align-items:center; } .check input { width:auto; }",
+    ".board { display:grid; gap:.75rem; }",
+    ".lane, .item, .pm-card { border: 1px solid var(--line); background: #ffffff0e; border-radius: 18px; padding: .9rem; margin: .7rem 0; }",
+    ".item-head { display:flex; justify-content:space-between; gap:.75rem; align-items:start; }",
+    ".pill { display:inline-flex; border-radius:999px; padding:.26rem .55rem; font-size:.76rem; font-weight:900; background:#ffffff18; color:var(--accent); }",
+    ".pill.blocked { color: var(--hot); } .pill.done { color: var(--ok); } .pill.parked { color: var(--warn); } .pill.side { color: var(--purple); }",
+    ".meta { color: var(--muted); font-size:.88rem; margin-top:.45rem; } .actions { display:flex; gap:.45rem; flex-wrap:wrap; margin-top:.75rem; } .actions button { padding:.55rem .7rem; font-size:.82rem; }",
+    ".recommendation { border-left: 4px solid var(--accent); padding-left: .85rem; }",
+    "@media (min-width: 860px) { .workspace { grid-template-columns: 360px 1fr; align-items:start; } .metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); } .board { grid-template-columns: repeat(5, minmax(0, 1fr)); } }",
+    "===END FILE===",
+    "===FILE: app.js===",
+    "const STORAGE_KEY = 'forge-projectops-items';",
+    "const seed = [",
+    "  { id:'apk-durable', title:'Make APK builder durable', owner:'Virgil', type:'Chore', status:'Doing', priority:'High', effort:'Small', blocked:false, nextAction:'Keep the builder alive, health-checked, token-gated, and wired to Convex', dependency:'Tailscale Funnel host stays reachable', risk:'Export APK dies after reboot' },",
+    "  { id:'projectops-real', title:'Make ProjectOps less toy', owner:'Virgil', type:'Feature', status:'Review', priority:'High', effort:'Small', blocked:false, nextAction:'Ship editable cards, filters, move/delete controls, and fact-based recommendations', dependency:'Template contract tests', risk:'Still feels like generic static cards' },",
+    "  { id:'native-android', title:'Native Android rewrite', owner:'Cal', type:'Side quest', status:'Backlog', priority:'Parked', effort:'Large', blocked:false, nextAction:'Do not start until the WebView APK proof fails to satisfy installs/open/share', dependency:'Real product need', risk:'Good idea, wrong time. Park it.' }",
+    "];",
+    "let items = (JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null') || seed).map((item, index) => ({ id: item.id || 'item-' + Date.now() + '-' + index, ...item }));",
+    "let currentView = 'board';",
+    "let statusFilter = 'all';",
+    "const metricsEl = document.querySelector('#metrics');",
+    "const viewEl = document.querySelector('#view');",
+    "const form = document.querySelector('#work-item-form');",
+    "const statusFilterEl = document.querySelector('#status-filter');",
+    "function save() { localStorage.setItem('forge-projectops-items', JSON.stringify(items)); }",
+    "function esc(value) { return String(value || '').replace(/[&<>\"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c])); }",
+    "function isBlocked(item) { return item.blocked === true || item.blocked === 'on'; }",
+    "function statusClass(item) { if (isBlocked(item)) return 'blocked'; if (item.status === 'Done') return 'done'; if (item.priority === 'Parked') return 'parked'; if (item.type === 'Side quest') return 'side'; return ''; }",
+    "function visibleItems() { return statusFilter === 'all' ? items : items.filter(i => i.status === statusFilter); }",
+    "function renderMetrics() {",
+    "  const blocked = items.filter(isBlocked).length;",
+    "  const sideQuests = detectSideQuests().length;",
+    "  metricsEl.innerHTML = [['Items', items.length], ['Blocked', blocked], ['Side quests', sideQuests], ['Owners', new Set(items.map(i => i.owner)).size]]",
+    "    .map(([label, value]) => '<div class=\"metric\"><strong>' + value + '</strong>' + label + '</div>').join('');",
+    "}",
+    "function renderItem(item) {",
+    "  const actions = '<div class=\"actions\"><button type=\"button\" data-action=\"edit\" data-id=\"' + esc(item.id) + '\">Edit</button><button type=\"button\" data-action=\"move\" data-id=\"' + esc(item.id) + '\">Move status</button><button type=\"button\" data-action=\"delete\" data-id=\"' + esc(item.id) + '\">Delete</button></div>';",
+    "  return '<article class=\"item\"><div class=\"item-head\"><strong>' + esc(item.title) + '</strong><span class=\"pill ' + statusClass(item) + '\">' + esc(isBlocked(item) ? 'Blocked' : item.priority) + '</span></div><p>' + esc(item.nextAction) + '</p><div class=\"meta\">' + esc(item.type) + ' · ' + esc(item.effort) + ' · Owner: ' + esc(item.owner) + ' · Status: ' + esc(item.status) + '</div><div class=\"meta\">Dependencies: ' + esc(item.dependency || 'none') + '</div>' + (item.risk ? '<div class=\"meta\">Risk: ' + esc(item.risk) + '</div>' : '') + actions + '</article>';",
+    "}",
+    "function renderBoard() {",
+    "  const statuses = ['Backlog', 'Ready', 'Doing', 'Review', 'Done'];",
+    "  const source = visibleItems();",
+    "  viewEl.innerHTML = '<h2>Kanban board</h2><p>Software delivery beats fake construction scheduling here.</p><section class=\"board\">' + statuses.map(status => '<section class=\"lane\"><h3>' + status + '</h3>' + (source.filter(i => i.status === status).map(renderItem).join('') || '<p>No work.</p>') + '</section>').join('') + '</section>';",
+    "}",
+    "function renderBacklog() {",
+    "  const ordered = [...visibleItems()].sort((a,b) => ['High','Medium','Low','Parked'].indexOf(a.priority) - ['High','Medium','Low','Parked'].indexOf(b.priority));",
+    "  viewEl.innerHTML = '<h2>Backlog</h2><p>Prioritized work, including parked side quest candidates.</p>' + ordered.map(renderItem).join('');",
+    "}",
+    "function renderSprintFocus() {",
+    "  const focus = visibleItems().filter(i => ['Doing','Review','Ready'].includes(i.status) && i.priority !== 'Parked');",
+    "  viewEl.innerHTML = '<h2>Sprint focus</h2><p>This week: do fewer things, finish more things.</p>' + (focus.map(renderItem).join('') || '<p>No focused work selected.</p>');",
+    "}",
+    "function renderRisks() {",
+    "  const risky = visibleItems().filter(i => isBlocked(i) || i.risk || i.dependency);",
+    "  viewEl.innerHTML = '<h2>Risks & blockers</h2><p>Lightweight dependency/risk panel, not a full P6 clone.</p>' + risky.map(renderItem).join('');",
+    "}",
+    "function detectSideQuests() { return visibleItems().filter(i => i.type === 'Side quest' || i.priority === 'Parked' || /rewrite|native|platform|framework/i.test(i.title + ' ' + i.nextAction)); }",
+    "function sideQuestWarning(item) { return 'Side-quest warning: ' + item.title + ' is ' + item.effort + ' effort, priority ' + item.priority + ', dependency: ' + (item.dependency || 'none') + '. ' + (item.risk || 'Park unless it unblocks current delivery.'); }",
+    "function recommendNextTask() {",
+    "  const unblocked = items.filter(i => !isBlocked(i) && i.priority === 'High' && i.status !== 'Done').sort((a,b) => ['Small','Medium','Large'].indexOf(a.effort) - ['Small','Medium','Large'].indexOf(b.effort));",
+    "  return unblocked[0] || items.find(i => !isBlocked(i) && i.status !== 'Done') || null;",
+    "}",
+    "function recommendationRationale(item) { if (!item) return ''; return 'Recommendation rationale: ' + item.title + ' is ' + item.priority + ' priority, ' + item.effort + ' effort, status ' + item.status + ', owner ' + item.owner + '. Next action: ' + item.nextAction; }",
+    "function renderPm() {",
+    "  const next = recommendNextTask();",
+    "  const sides = detectSideQuests();",
+    "  viewEl.innerHTML = '<h2>AI project manager</h2><section class=\"pm-card recommendation\"><h3>Recommended next task</h3>' + (next ? '<p>' + esc(recommendationRationale(next)) + '</p>' + renderItem(next) : '<p>Nothing obvious. Weird, but possible.</p>') + '</section><section class=\"pm-card\"><h3>Side quest detector</h3>' + (sides.length ? sides.map(i => '<p>' + esc(sideQuestWarning(i)) + '</p>' + renderItem(i)).join('') : '<p>No obvious side quests.</p>') + '</section>';",
+    "}",
+    "function render() { renderMetrics(); if (currentView === 'board') renderBoard(); if (currentView === 'backlog') renderBacklog(); if (currentView === 'sprint') renderSprintFocus(); if (currentView === 'risks') renderRisks(); if (currentView === 'pm') renderPm(); }",
+    "function addWorkItem(data) {",
+    "  data.blocked = data.blocked === 'on';",
+    "  data.id = data.id || 'item-' + Date.now();",
+    "  const existing = items.findIndex(i => i.id === data.id || i.title.toLowerCase() === data.title.toLowerCase());",
+    "  if (existing >= 0) items[existing] = data; else items.unshift(data);",
+    "  save(); render();",
+    "}",
+    "function editWorkItem(id) { const item = items.find(i => i.id === id); if (!item) return; Object.entries(item).forEach(([key, value]) => { if (form.elements[key]) { if (form.elements[key].type === 'checkbox') form.elements[key].checked = !!value; else form.elements[key].value = value; } }); form.scrollIntoView({ behavior:'smooth', block:'start' }); }",
+    "function deleteWorkItem(id) { items = items.filter(i => i.id !== id); save(); render(); }",
+    "function moveWorkItem(id) { const statuses = ['Backlog','Ready','Doing','Review','Done']; const item = items.find(i => i.id === id); if (!item) return; item.status = statuses[(statuses.indexOf(item.status) + 1) % statuses.length]; save(); render(); }",
+    "form.addEventListener('submit', event => { event.preventDefault(); addWorkItem(Object.fromEntries(new FormData(form))); form.reset(); });",
+    "statusFilterEl.addEventListener('change', () => { statusFilter = statusFilterEl.value; render(); });",
+    "document.querySelector('#clear-done').addEventListener('click', () => { items = items.filter(i => i.status !== 'Done'); save(); render(); });",
+    "viewEl.addEventListener('click', event => { const btn = event.target.closest('button[data-action]'); if (!btn) return; if (btn.dataset.action === 'edit') editWorkItem(btn.dataset.id); if (btn.dataset.action === 'delete') deleteWorkItem(btn.dataset.id); if (btn.dataset.action === 'move') moveWorkItem(btn.dataset.id); });",
+    "document.querySelectorAll('.tab').forEach(btn => btn.addEventListener('click', () => { document.querySelectorAll('.tab').forEach(b => b.classList.remove('active')); btn.classList.add('active'); currentView = btn.dataset.view; render(); }));",
+    "render();",
+    "===END FILE===",
+  ].join("\n");
+}
+
+export function renderPocTemplate(user: string): string {
+  const prompt = user.replace(/^Build this web app:\s*/i, "").trim() || "a useful tiny app";
+  if (isProjectOpsPrompt(prompt)) return renderProjectOpsTemplate();
+  const safePrompt = escapeHtml(prompt);
+  const appName = titleFromPrompt(prompt);
+  return `APP_NAME: ${appName}
+APP_EMOJI: ⚡
+SUMMARY: Zero-cost POC template generated from the prompt.
+===FILE: index.html===
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>${escapeHtml(appName)}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <p class="eyebrow">Forge zero-cost POC</p>
+      <h1>${escapeHtml(appName)}</h1>
+      <p class="prompt">${safePrompt}</p>
+      <div class="actions">
+        <button id="primary">Try it</button>
+        <button id="save">Save note</button>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>What works</h2>
+      <ul id="checks">
+        <li>Convex created the project</li>
+        <li>Daytona hosted this preview</li>
+        <li>Frontend JS is interactive</li>
+      </ul>
+      <textarea id="note" placeholder="Type a quick note…"></textarea>
+      <p id="status">Ready.</p>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
+===END FILE===
+===FILE: style.css===
+:root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; }
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; background: radial-gradient(circle at top left, #7c3aed55, transparent 32rem), linear-gradient(135deg, #050816, #101827 55%, #020617); color: white; }
+.shell { min-height: 100vh; display: grid; gap: 1rem; padding: max(2rem, env(safe-area-inset-top)) 1rem 2rem; align-content: center; max-width: 920px; margin: 0 auto; }
+.hero, .panel { border: 1px solid #ffffff1f; background: #ffffff12; border-radius: 28px; padding: 1.25rem; box-shadow: 0 24px 80px #0008; backdrop-filter: blur(18px); }
+.eyebrow { color: #a78bfa; text-transform: uppercase; letter-spacing: .12em; font-size: .75rem; font-weight: 900; }
+h1 { font-size: clamp(2.3rem, 12vw, 5.5rem); line-height: .88; margin: .25rem 0 1rem; letter-spacing: -.08em; }
+.prompt { color: #dbeafe; font-size: 1.1rem; line-height: 1.5; }
+.actions { display: flex; gap: .75rem; flex-wrap: wrap; margin-top: 1.25rem; }
+button { border: 0; border-radius: 999px; padding: .95rem 1.2rem; font-weight: 900; color: white; background: #7c3aed; box-shadow: 0 12px 30px #7c3aed66; }
+button:last-child { background: #ffffff1f; box-shadow: none; }
+button:active { transform: translateY(1px) scale(.99); }
+.panel h2 { margin-top: 0; }
+li { margin: .6rem 0; color: #dcfce7; }
+textarea { width: 100%; min-height: 110px; border: 1px solid #ffffff24; border-radius: 18px; background: #02061799; color: white; padding: 1rem; font: inherit; resize: vertical; }
+#status { color: #bae6fd; font-weight: 700; }
+@media (min-width: 760px) { .shell { grid-template-columns: 1.2fr .8fr; } }
+===END FILE===
+===FILE: app.js===
+const statusEl = document.querySelector('#status');
+const noteEl = document.querySelector('#note');
+document.querySelector('#primary').addEventListener('click', () => {
+  const count = Number(localStorage.getItem('forge-poc-clicks') || '0') + 1;
+  localStorage.setItem('forge-poc-clicks', String(count));
+  statusEl.textContent = 'Button works. Click count: ' + count + '.';
+});
+document.querySelector('#save').addEventListener('click', () => {
+  localStorage.setItem('forge-poc-note', noteEl.value.trim());
+  statusEl.textContent = noteEl.value.trim() ? 'Saved locally.' : 'Nothing to save yet.';
+});
+noteEl.value = localStorage.getItem('forge-poc-note') || '';
+===END FILE===`;
+}
+
 async function callClaude(system: string, user: string, model: string): Promise<string> {
+  if (builderProvider() === "poc-template") return renderPocTemplate(user);
+
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) throw new Error("ANTHROPIC_API_KEY is not set on the Convex deployment");
   const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -888,6 +1174,108 @@ export const ensureRunning = internalAction({
         status: "live",
         statusDetail: "Preview may be sleeping — try again",
       });
+    }
+    return null;
+  },
+});
+
+type AndroidApkBuilderResponse = {
+  downloadUrl?: string;
+  apkUrl?: string;
+  artifactUrl?: string;
+  url?: string;
+};
+
+async function callAndroidApkBuilder(spec: {
+  projectId: string;
+  appName: string;
+  packageId: string;
+  previewUrl: string;
+  artifactName: string;
+}): Promise<string> {
+  const endpoint = process.env.FORGE_ANDROID_APK_BUILDER_URL;
+  if (!endpoint) {
+    throw new Error("FORGE_ANDROID_APK_BUILDER_URL is not set on the Convex deployment");
+  }
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const token = process.env.FORGE_ANDROID_APK_BUILDER_TOKEN;
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(spec),
+    signal: AbortSignal.timeout(540_000),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Android APK builder failed (${res.status}): ${body.slice(0, 300)}`);
+  }
+  const data = (await res.json()) as AndroidApkBuilderResponse;
+  const url = data.downloadUrl ?? data.apkUrl ?? data.artifactUrl ?? data.url;
+  if (!url) throw new Error("Android APK builder response did not include a download URL");
+  return url;
+}
+
+export const buildAndroidApk = internalAction({
+  args: { projectId: v.id("projects") },
+  returns: v.null(),
+  handler: async (ctx, { projectId }) => {
+    const project = await ctx.runQuery(internal.projects.getInternal, { id: projectId });
+    if (!project) return null;
+    try {
+      if (project.platform === "mobile") {
+        throw new Error("Android APK export is only available for web projects right now");
+      }
+      if (!project.previewUrl) {
+        throw new Error("No live preview URL yet — build the web app first");
+      }
+
+      let previewUrl = project.previewUrl;
+      if (project.sandboxId) {
+        const sb = await getSandbox(project.sandboxId).catch(() => null);
+        if (!sb || ["destroyed", "error", "build_failed"].includes(sb.state)) {
+          throw new Error("The Daytona sandbox is gone — rebuild the web app first");
+        }
+        if (sb.state !== "started") {
+          await setStatus(ctx, projectId, "waking", "Waking your app before APK export");
+          await log(ctx, projectId, "☀️ Waking the sandbox before Android export…");
+          if (sb.state === "stopping") {
+            await waitForSandboxState(project.sandboxId, "stopped", 60_000);
+          }
+          await startSandbox(project.sandboxId);
+        }
+        await startStaticServer(project.sandboxId);
+        previewUrl = await getPreviewUrl(project.sandboxId);
+        if (previewUrl !== project.previewUrl) {
+          await ctx.runMutation(internal.projects.update, { id: projectId, previewUrl });
+        }
+      }
+      await waitForPreview(previewUrl);
+
+      const spec = androidApkBuildSpec({
+        projectId,
+        name: project.name,
+        previewUrl,
+      });
+      await setStatus(ctx, projectId, "building", "Building Android APK");
+      await log(ctx, projectId, `📱 Building Android APK (${spec.packageId})…`);
+      const apkUrl = await callAndroidApkBuilder({ projectId, ...spec });
+      await ctx.runMutation(internal.projects.update, {
+        id: projectId,
+        status: "live",
+        statusDetail: "Live",
+        installUrl: apkUrl,
+        clearError: true,
+      });
+      await log(ctx, projectId, `✅ Android APK is ready: ${apkUrl}`, "agent");
+    } catch (err) {
+      await ctx.runMutation(internal.projects.update, {
+        id: projectId,
+        status: project.previewUrl ? "live" : "error",
+        statusDetail: project.previewUrl ? "Live (Android APK failed)" : "Android APK failed",
+        error: errorMessage(err),
+      });
+      await log(ctx, projectId, `❌ Android APK failed: ${errorMessage(err)}`, "agent");
     }
     return null;
   },

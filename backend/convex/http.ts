@@ -1,5 +1,6 @@
 import { httpRouter } from "convex/server";
 import { httpAction } from "./_generated/server";
+import { requireAiProxyAccess } from "./auth";
 
 // AI proxy for generated apps: forwards /ai/* to the Vercel AI Gateway with
 // the key injected server-side, so no generated app ever contains the key.
@@ -28,6 +29,16 @@ http.route({
   pathPrefix: "/ai/",
   method: "POST",
   handler: httpAction(async (_ctx, request) => {
+    try {
+      requireAiProxyAccess(request);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return new Response(JSON.stringify({ error: message }), {
+        status: 403,
+        headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+      });
+    }
+
     const key = process.env.VERCEL_AI_GATEWAY_KEY;
     if (!key) {
       return new Response(JSON.stringify({ error: "AI gateway key not configured" }), {

@@ -9,6 +9,13 @@ final class ConvexService {
     private init() {
         client = ConvexClient(deploymentUrl: AppConfig.convexDeploymentURL)
     }
+
+    static func authArgs(_ args: [String: String] = [:]) -> [String: String] {
+        guard !AppConfig.accessToken.isEmpty else { return args }
+        var authed = args
+        authed["accessToken"] = AppConfig.accessToken
+        return authed
+    }
 }
 
 @MainActor
@@ -19,7 +26,7 @@ final class ProjectsViewModel: ObservableObject {
 
     init() {
         ConvexService.shared.client
-            .subscribe(to: "projects:list", yielding: [Project].self)
+            .subscribe(to: "projects:list", with: ConvexService.authArgs(), yielding: [Project].self)
             .replaceError(with: [])
             .receive(on: DispatchQueue.main)
             .sink { [weak self] projects in
@@ -32,9 +39,9 @@ final class ProjectsViewModel: ObservableObject {
     func create(prompt: String, platform: String, model: String) async -> String? {
         do {
             let id: String = try await ConvexService.shared.client
-                .mutation("projects:create", with: [
+                .mutation("projects:create", with: ConvexService.authArgs([
                     "prompt": prompt, "platform": platform, "model": model,
-                ])
+                ]))
             return id
         } catch {
             print("Forge: create failed: \(error)")
@@ -46,7 +53,7 @@ final class ProjectsViewModel: ObservableObject {
         Task {
             do {
                 try await ConvexService.shared.client
-                    .mutation("projects:remove", with: ["id": project.id])
+                    .mutation("projects:remove", with: ConvexService.authArgs(["id": project.id]))
             } catch {
                 print("Forge: delete failed: \(error)")
             }
@@ -67,21 +74,21 @@ final class ProjectViewModel: ObservableObject {
         let client = ConvexService.shared.client
 
         client
-            .subscribe(to: "projects:get", with: ["id": projectId], yielding: Project?.self)
+            .subscribe(to: "projects:get", with: ConvexService.authArgs(["id": projectId]), yielding: Project?.self)
             .replaceError(with: nil)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] in self?.project = $0 }
             .store(in: &cancellables)
 
         client
-            .subscribe(to: "messages:list", with: ["projectId": projectId], yielding: [Message].self)
+            .subscribe(to: "messages:list", with: ConvexService.authArgs(["projectId": projectId]), yielding: [Message].self)
             .replaceError(with: [])
             .receive(on: DispatchQueue.main)
             .sink { [weak self] in self?.messages = $0 }
             .store(in: &cancellables)
 
         client
-            .subscribe(to: "files:list", with: ["projectId": projectId], yielding: [ProjectFile].self)
+            .subscribe(to: "files:list", with: ConvexService.authArgs(["projectId": projectId]), yielding: [ProjectFile].self)
             .replaceError(with: [])
             .receive(on: DispatchQueue.main)
             .sink { [weak self] in self?.files = $0 }
@@ -91,7 +98,7 @@ final class ProjectViewModel: ObservableObject {
     func send(_ text: String) async -> Bool {
         do {
             try await ConvexService.shared.client
-                .mutation("messages:send", with: ["projectId": projectId, "content": text])
+                .mutation("messages:send", with: ConvexService.authArgs(["projectId": projectId, "content": text]))
             return true
         } catch {
             print("Forge: send failed: \(error)")
@@ -102,7 +109,7 @@ final class ProjectViewModel: ObservableObject {
     func setModel(_ model: String) {
         Task {
             try? await ConvexService.shared.client
-                .mutation("projects:setModel", with: ["id": projectId, "model": model])
+                .mutation("projects:setModel", with: ConvexService.authArgs(["id": projectId, "model": model]))
         }
     }
 
@@ -110,14 +117,28 @@ final class ProjectViewModel: ObservableObject {
     func wake() {
         Task {
             try? await ConvexService.shared.client
-                .mutation("projects:wake", with: ["id": projectId])
+                .mutation("projects:wake", with: ConvexService.authArgs(["id": projectId]))
         }
     }
 
     func retry() {
         Task {
             try? await ConvexService.shared.client
-                .mutation("projects:retry", with: ["id": projectId])
+                .mutation("projects:retry", with: ConvexService.authArgs(["id": projectId]))
+        }
+    }
+
+    func exportAndroidApk() async -> Bool {
+        do {
+            try await ConvexService.shared.client
+                .mutation("messages:send", with: ConvexService.authArgs([
+                    "projectId": projectId,
+                    "content": "Export Android APK",
+                ]))
+            return true
+        } catch {
+            print("Forge: Android APK export failed to start: \(error)")
+            return false
         }
     }
 }

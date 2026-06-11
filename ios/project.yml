@@ -29,7 +29,7 @@ targets:
       - target: Forge
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.rilable.uitests
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.forge.uitests
         SWIFT_VERSION: "5.0"
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: ""
@@ -43,19 +43,19 @@ targets:
     info:
       path: Info.plist
       properties:
-        CFBundleDisplayName: Rilable
+        CFBundleDisplayName: Forge
         UILaunchScreen: {}
         UIUserInterfaceStyle: Dark
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         CFBundleURLTypes:
-          - CFBundleURLName: com.example.rilable
+          - CFBundleURLName: com.example.forge
             CFBundleURLSchemes: [forge]
         NSMicrophoneUsageDescription: "Lovable uses the microphone so you can describe apps with your voice."
     settings:
       base:
         # Set these two for your own builds: any reverse-DNS bundle id you own,
         # and your Apple Developer team id (leave "" for simulator-only).
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.rilable
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.forge
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1"

@@ -110,7 +110,7 @@ struct HomeView: View {
                     .resizable()
                     .scaledToFit()
                     .frame(width: 28, height: 28)
-                Text("Rilable")
+                Text("Forge")
                     .font(.system(size: 27, weight: .bold, design: .serif))
                     .foregroundStyle(.white)
             }
@@ -204,7 +204,7 @@ struct HomeView: View {
             TextField(
                 "",
                 text: $prompt,
-                prompt: Text("Ask Rilable to build anything…")
+                prompt: Text("Ask Forge to build anything…")
                     .foregroundStyle(Theme.textSecondary),
                 axis: .vertical
             )

@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { query, internalMutation, internalQuery } from "./_generated/server";
+import { requireAccessToken } from "./auth";
 
 const fileShape = v.object({
   _id: v.id("files"),
@@ -10,9 +11,10 @@ const fileShape = v.object({
 });
 
 export const list = query({
-  args: { projectId: v.id("projects") },
+  args: { projectId: v.id("projects"), accessToken: v.optional(v.string()) },
   returns: v.array(fileShape),
-  handler: async (ctx, { projectId }) => {
+  handler: async (ctx, { projectId, accessToken }) => {
+    requireAccessToken(accessToken);
     const files = await ctx.db
       .query("files")
       .withIndex("by_project", (q) => q.eq("projectId", projectId))

@@ -2,13 +2,15 @@
 
 import { v } from "convex/values";
 import { action } from "./_generated/server";
+import { requireAccessToken } from "./auth";
 
 /// Transcribe a short voice recording (base64 m4a/AAC) with OpenAI Whisper.
 /// The OpenAI key lives only on the deployment — never in the iOS app.
 export const transcribe = action({
-  args: { audioBase64: v.string() },
+  args: { audioBase64: v.string(), accessToken: v.optional(v.string()) },
   returns: v.object({ text: v.string() }),
-  handler: async (_ctx, { audioBase64 }) => {
+  handler: async (_ctx, { audioBase64, accessToken }) => {
+    requireAccessToken(accessToken);
     const key = process.env.OPENAI_API_KEY;
     if (!key) throw new Error("OPENAI_API_KEY is not set on the Convex deployment");
     const bytes = Buffer.from(audioBase64, "base64");

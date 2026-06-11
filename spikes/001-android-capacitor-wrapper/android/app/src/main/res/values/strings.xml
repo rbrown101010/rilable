@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Forge POC</string>
+    <string name="title_activity_main">Forge POC</string>
+    <string name="package_name">com.forge.poc</string>
+    <string name="custom_url_scheme">com.forge.poc</string>
+</resources>

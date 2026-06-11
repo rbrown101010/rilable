@@ -5,6 +5,8 @@ struct ChatView: View {
     @StateObject private var voice = VoiceRecorder()
     @State private var draft = ""
     @State private var sending = false
+    @State private var exportingApk = false
+    @State private var apkExportError: String?
     @State private var showPreview = false
     @State private var showDetails = false
     @FocusState private var focused: Bool
@@ -242,6 +244,7 @@ struct ChatView: View {
                 if !parsed.body.isEmpty {
                     MarkdownText(content: parsed.body)
                 }
+                apkExportPanel
                 actionRow(copyText: parsed.body.isEmpty ? message.content : parsed.body)
             }
         } else if message.content.hasPrefix("❌") {
@@ -280,6 +283,60 @@ struct ChatView: View {
             body = String(content[bangRange.upperBound...]).trimmingCharacters(in: .whitespaces)
         }
         return (title, body)
+    }
+
+    @ViewBuilder
+    private var apkExportPanel: some View {
+        if let project = vm.project, project.platform != "mobile", project.isLive {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    Button {
+                        startApkExport()
+                    } label: {
+                        Label(exportingApk ? "Exporting APK…" : "Export APK", systemImage: "square.and.arrow.down")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 46)
+                            .background(Theme.surfaceLight, in: Capsule())
+                    }
+                    .disabled(exportingApk)
+                    .accessibilityIdentifier("exportApkButton")
+
+                    if let installUrl = project.installUrl, let url = URL(string: installUrl) {
+                        Link(destination: url) {
+                            Text("Download")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(.black)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 46)
+                                .background(.white, in: Capsule())
+                        }
+                        .accessibilityIdentifier("downloadApkLink")
+                    }
+                }
+                if exportingApk || project.status == "building" {
+                    Text(project.statusDetail ?? "Building Android APK…")
+                        .font(.system(size: 14))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                if let apkExportError {
+                    Text(apkExportError)
+                        .font(.system(size: 14))
+                        .foregroundStyle(Theme.red)
+                } else if project.error?.localizedCaseInsensitiveContains("android apk") == true {
+                    Text(project.error ?? "Android APK builder unavailable.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(Theme.red)
+                }
+            }
+            .padding(14)
+            .background(Theme.surface.opacity(0.72), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(Theme.stroke, lineWidth: 1)
+            )
+        }
     }
 
     private func actionRow(copyText: String) -> some View {
@@ -345,7 +402,7 @@ struct ChatView: View {
             TextField(
                 "",
                 text: $draft,
-                prompt: Text(busy ? "Queue follow-up…" : "Ask Rilable…")
+                prompt: Text(busy ? "Queue follow-up…" : "Ask Forge…")
                     .foregroundStyle(Theme.textSecondary),
                 axis: .vertical
             )
@@ -443,6 +500,22 @@ struct ChatView: View {
                 Haptics.error()
             }
             sending = false
+        }
+    }
+
+    private func startApkExport() {
+        guard !exportingApk else { return }
+        exportingApk = true
+        apkExportError = nil
+        Haptics.tap()
+        Task {
+            if await vm.exportAndroidApk() {
+                apkExportError = nil
+            } else {
+                apkExportError = "Android APK builder unavailable or not configured. Try again after the builder is online."
+                Haptics.error()
+            }
+            exportingApk = false
         }
     }
 }

@@ -7,6 +7,7 @@ import {
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { isAllowedModel, DEFAULT_MODEL_KEY } from "./models";
+import { requireAccessToken } from "./auth";
 
 const projectShape = v.object({
   _id: v.id("projects"),
@@ -31,17 +32,19 @@ const projectShape = v.object({
 });
 
 export const list = query({
-  args: {},
+  args: { accessToken: v.optional(v.string()) },
   returns: v.array(projectShape),
-  handler: async (ctx) => {
+  handler: async (ctx, { accessToken }) => {
+    requireAccessToken(accessToken);
     return await ctx.db.query("projects").order("desc").take(100);
   },
 });
 
 export const get = query({
-  args: { id: v.id("projects") },
+  args: { id: v.id("projects"), accessToken: v.optional(v.string()) },
   returns: v.union(projectShape, v.null()),
-  handler: async (ctx, { id }) => {
+  handler: async (ctx, { id, accessToken }) => {
+    requireAccessToken(accessToken);
     return await ctx.db.get(id);
   },
 });
@@ -51,9 +54,11 @@ export const create = mutation({
     prompt: v.string(),
     platform: v.optional(v.string()),
     model: v.optional(v.string()),
+    accessToken: v.optional(v.string()),
   },
   returns: v.id("projects"),
-  handler: async (ctx, { prompt, platform, model }) => {
+  handler: async (ctx, { prompt, platform, model, accessToken }) => {
+    requireAccessToken(accessToken);
     const target = platform === "mobile" ? "mobile" : "web";
     const id = await ctx.db.insert("projects", {
       name: "New App",
@@ -77,9 +82,10 @@ export const create = mutation({
 });
 
 export const retry = mutation({
-  args: { id: v.id("projects") },
+  args: { id: v.id("projects"), accessToken: v.optional(v.string()) },
   returns: v.null(),
-  handler: async (ctx, { id }) => {
+  handler: async (ctx, { id, accessToken }) => {
+    requireAccessToken(accessToken);
     const project = await ctx.db.get(id);
     if (!project) return null;
     await ctx.db.patch(id, {
@@ -100,9 +106,10 @@ export const retry = mutation({
 // Fired when a project is opened on the phone. Web: wake an auto-stopped
 // sandbox. Mobile: refresh the tokenized simulator preview if needed.
 export const wake = mutation({
-  args: { id: v.id("projects") },
+  args: { id: v.id("projects"), accessToken: v.optional(v.string()) },
   returns: v.null(),
-  handler: async (ctx, { id }) => {
+  handler: async (ctx, { id, accessToken }) => {
+    requireAccessToken(accessToken);
     const project = await ctx.db.get(id);
     if (!project || project.status !== "live") return null;
     if (!project.sandboxId && project.platform !== "mobile") return null;
@@ -113,9 +120,10 @@ export const wake = mutation({
 
 // Switch which Claude model the agent uses for this project's future builds.
 export const setModel = mutation({
-  args: { id: v.id("projects"), model: v.string() },
+  args: { id: v.id("projects"), model: v.string(), accessToken: v.optional(v.string()) },
   returns: v.null(),
-  handler: async (ctx, { id, model }) => {
+  handler: async (ctx, { id, model, accessToken }) => {
+    requireAccessToken(accessToken);
     if (!isAllowedModel(model)) throw new Error("Unknown model");
     const project = await ctx.db.get(id);
     if (!project) return null;
@@ -125,9 +133,10 @@ export const setModel = mutation({
 });
 
 export const remove = mutation({
-  args: { id: v.id("projects") },
+  args: { id: v.id("projects"), accessToken: v.optional(v.string()) },
   returns: v.null(),
-  handler: async (ctx, { id }) => {
+  handler: async (ctx, { id, accessToken }) => {
+    requireAccessToken(accessToken);
     const project = await ctx.db.get(id);
     if (!project) return null;
     const messages = await ctx.db

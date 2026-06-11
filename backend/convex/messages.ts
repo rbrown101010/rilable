@@ -7,6 +7,8 @@ import {
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { isAllowedModel } from "./models";
+import { requireAccessToken } from "./auth";
+import { wantsAndroidApk } from "./android";
 
 const messageShape = v.object({
   _id: v.id("messages"),
@@ -39,9 +41,10 @@ function wantsInstallLink(text: string): boolean {
 }
 
 export const list = query({
-  args: { projectId: v.id("projects") },
+  args: { projectId: v.id("projects"), accessToken: v.optional(v.string()) },
   returns: v.array(messageShape),
-  handler: async (ctx, { projectId }) => {
+  handler: async (ctx, { projectId, accessToken }) => {
+    requireAccessToken(accessToken);
     const recent = await ctx.db
       .query("messages")
       .withIndex("by_project", (q) => q.eq("projectId", projectId))
@@ -56,9 +59,11 @@ export const send = mutation({
     projectId: v.id("projects"),
     content: v.string(),
     model: v.optional(v.string()),
+    accessToken: v.optional(v.string()),
   },
   returns: v.null(),
-  handler: async (ctx, { projectId, content, model }) => {
+  handler: async (ctx, { projectId, content, model, accessToken }) => {
+    requireAccessToken(accessToken);
     const project = await ctx.db.get(projectId);
     if (!project) throw new Error("Project not found");
     if (BUSY_STATUSES.includes(project.status)) {
@@ -68,7 +73,14 @@ export const send = mutation({
       await ctx.db.patch(projectId, { model });
     }
     await ctx.db.insert("messages", { projectId, role: "user", content });
-    if (project.platform === "mobile" && wantsInstallLink(content)) {
+    if (project.platform !== "mobile" && wantsAndroidApk(content)) {
+      await ctx.db.patch(projectId, {
+        status: "building",
+        statusDetail: "Building Android APK",
+        updatedAt: Date.now(),
+      });
+      await ctx.scheduler.runAfter(0, internal.builder.buildAndroidApk, { projectId });
+    } else if (project.platform === "mobile" && wantsInstallLink(content)) {
       await ctx.db.patch(projectId, {
         status: "signing",
         statusDetail: "Preparing your install link",
